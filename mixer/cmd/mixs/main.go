@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"istio.io/istio/mixer/adapter"
@@ -34,6 +35,7 @@ func supportedAdapters() []adptr.InfoFn {
 }
 
 func main() {
+	fmt.Println("Devsisters Corp. version 0.2")
 	rootCmd := cmd.GetRootCmd(os.Args[1:], supportedTemplates(), supportedAdapters(), shared.Printf, shared.Fatalf)
 
 	if err := rootCmd.Execute(); err != nil {

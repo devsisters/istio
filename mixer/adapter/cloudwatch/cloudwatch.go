@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/service/cloudwatch/cloudwatchiface"
@@ -186,7 +187,18 @@ func (h *handler) HandleMetric(ctx context.Context, insts []*metric.Instance) er
 
 // HandleLogEntry sends logentries to cloudwatchlogs
 func (h *handler) HandleLogEntry(ctx context.Context, insts []*logentry.Instance) error {
-	logentryData := h.generateLogEntryData(insts)
+	logentryData, reportable := h.generateLogEntryData(insts)
+
+	// reportable이 true일 경우 전송할 할 데이터가 0개임
+	if reportable {
+		return nil
+	}
+
+	// Timestamp에 따라 sort한다. 그러지 않으면 AWS SDK에서 order가 이상하다는 에러가 반환됨
+	sort.Slice(logentryData, func(i, j int) bool {
+		return *logentryData[i].Timestamp < *logentryData[j].Timestamp
+	})
+
 	_, err := h.sendLogEntriesToCloudWatch(logentryData)
 	return err
 }

@@ -15,8 +15,11 @@
 package cloudwatch
 
 import (
+	"fmt"
 	"html/template"
 	"net"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,10 +42,20 @@ const (
 		`{{or (.protocol) "-"}}" {{or (.response_code) "-"}} {{or (.response_size) "-"}}`
 )
 
-func (h *handler) generateLogEntryData(insts []*logentry.Instance) []*cloudwatchlogs.InputLogEvent {
+var cloudwatch_latency_limit string = os.Getenv("CLOUDWATCH_LATENCY_LIMIT")
+
+// 원래는 이렇게 구현하면 안된다. 근데 DURATION을 int로 바꾸고, 그걸 또 전수 비교 하는것보단 단일 regex로 쓰는게 나을것같이 이렇게 구현
+var r, _ = regexp.Compile(fmt.Sprintf("[%s-9](\\d*)(\\.)(\\d*)s", cloudwatch_latency_limit)) // CLOUDWATCH_LIMIT이 3면 3s 이상만 걸러낸다.
+
+func (h *handler) generateLogEntryData(insts []*logentry.Instance) ([]*cloudwatchlogs.InputLogEvent, bool) {
 	logentryData := make([]*cloudwatchlogs.InputLogEvent, 0, len(insts))
 
 	for _, inst := range insts {
+		latency := fmt.Sprintf("%v", inst.Variables["latency"])
+		if !r.MatchString(latency) {
+			continue
+		}
+
 		// cloudwatchlogs accepts unix timestamp in milliseconds
 		timestamp := inst.Timestamp.UnixNano() / int64(time.Millisecond)
 
@@ -59,7 +72,13 @@ func (h *handler) generateLogEntryData(insts []*logentry.Instance) []*cloudwatch
 
 		logentryData = append(logentryData, &logEvent)
 	}
-	return logentryData
+
+	// 만약 report할 데이터 갯수가 0이라면 true를 반환하고, dsecribeLogGroup/Stream을 하지 않는다. 이걸 안하면 rate exceed limit이 뜸
+	if len(logentryData) == 0{
+		return logentryData, true
+	}
+
+	return logentryData, false
 }
 
 func getMessageFromVariables(h *handler, inst *logentry.Instance) (string, error) {
