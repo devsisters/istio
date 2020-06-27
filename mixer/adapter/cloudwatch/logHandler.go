@@ -23,12 +23,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	multierror "github.com/hashicorp/go-multierror"
 
 	"istio.io/istio/mixer/template/logentry"
 	"istio.io/pkg/pool"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 )
 
 const (
@@ -147,9 +149,30 @@ func (h *handler) putLogEntryData(logentryData []*cloudwatchlogs.InputLogEvent, 
 
 	_, err := h.cloudwatchlogs.PutLogEvents(&input)
 	if err != nil {
-		return h.env.Logger().Errorf("could not put logentry data into cloudwatchlogs: %v. %v", input, err)
+		err = h.processInvalidSequenceToken(input, err)
+		if err != nil {
+			return h.env.Logger().Errorf("could not put logentry data into cloudwatchlogs: %v. %v", input, err)
+		}
 	}
 	return nil
+}
+
+func (h *handler) processInvalidSequenceToken(input cloudwatchlogs.PutLogEventsInput, err error) error {
+	awsErr, _ := err.(awserr.Error)
+	if awsErr.Code() == "InvalidSequenceTokenException" {
+		invalidSequenceToken := err.(*cloudwatchlogs.InvalidSequenceTokenException)
+		fmt.Printf("Invaild Sequence Token, %s \n", *invalidSequenceToken.ExpectedSequenceToken)
+
+		input.SetSequenceToken(*invalidSequenceToken.ExpectedSequenceToken)
+		_, err = h.cloudwatchlogs.PutLogEvents(&input)
+
+		if err != nil {
+			fmt.Println("Tried again, but failed")
+		} else {
+			fmt.Println("Tried again, and Success")
+		}
+	}
+	return err
 }
 
 func getNextSequenceToken(h *handler) (string, error) {
